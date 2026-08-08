@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const rpcServerURL = "http://localhost:8333"
+const rpcServerURL = "http://localhost:19332"
 
 func main() {
 	if len(os.Args) < 2 {
