@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"os"
+	"os/exec"
 	"strconv"
 	"sync"
 	"time"
@@ -227,6 +230,24 @@ func (bc *Blockchain) PrintChain() {
 
 // Fungsi utama daemon XCOSH terintegrasi penuh
 func main() {
+	// Dukungan flag -daemon ala Bitcoin Core
+	daemonFlag := flag.Bool("daemon", false, "Jalankan daemon node XCOSH di latar belakang")
+	flag.Parse()
+
+	if *daemonFlag {
+		fmt.Println("[*] Memulai XCOSH Daemon di latar belakang...")
+		cmd := exec.Command(os.Args[0])
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+		err := cmd.Start()
+		if err != nil {
+			fmt.Printf("Gagal menjalankan daemon: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("[+] Daemon XCOSH berhasil berjalan di background (PID: %d)\n", cmd.Process.Pid)
+		return
+	}
+
 	fmt.Println("=============================================================")
 	fmt.Println("         MEMULAI DAEMON CORE XCOSH (POST-QUANTUM)            ")
 	fmt.Println("=============================================================")
