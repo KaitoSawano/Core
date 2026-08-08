@@ -242,7 +242,7 @@ func main() {
 	fmt.Printf("    Alamat (Address) : %s\n", minerWallet.GetAddress())
 	fmt.Println("-------------------------------------------------------------")
 
-	// 2. Inisialisasi Blockchain + Disk Database + P2P Node (Port 19333)
+	// 2. Inisialisasi Blockchain + Disk Database + P2P Node (Port Default 19333)
 	var initialDifficulty uint = 2
 	myChain, err := NewBlockchain(initialDifficulty, minerWallet.GetAddress(), "xcosh.db", "19333")
 	if err != nil {
@@ -307,8 +307,8 @@ func main() {
 	// Cetak rantai blockchain akhir
 	myChain.PrintChain()
 
-	// 6. Jalankan RPC/API Server di background (Port 8333)
-	rpcServer := internal.NewRPCServer("8333", func() map[string]interface{} {
+	// 6. Jalankan RPC/API Server di background (Port 19332)
+	rpcServer := internal.NewRPCServer("19332", func() map[string]interface{} {
 		myChain.Mu.Lock()
 		defer myChain.Mu.Unlock()
 		return map[string]interface{}{
@@ -318,6 +318,7 @@ func main() {
 			"difficulty":    myChain.Difficulty,
 			"mempool_size":  len(myChain.Mempool.PendingTxs),
 			"p2p_port":      "19333",
+			"rpc_port":      "19332",
 			"active_peers":  len(myChain.P2PNode.Peers),
 			"miner_address": minerWallet.GetAddress(),
 		}
@@ -325,6 +326,6 @@ func main() {
 	rpcServer.Start()
 
 	// Menjaga agar daemon terus berjalan sebagai proses latar depan (blocking)
-	fmt.Println("[*] Daemon XCOSH berjalan penuh (P2P Port: 19333 | RPC Port: 8333)...")
+	fmt.Println("[*] Daemon XCOSH berjalan penuh (P2P Port: 19333 | RPC Port: 19332)...")
 	select {}
 }
