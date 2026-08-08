@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"xcosh/internal"
+	"xcosh/p2p"
 	"xcosh/storage/db"
 	"xcosh/storage/wallet"
 )
@@ -35,6 +36,7 @@ type Blockchain struct {
 	Difficulty uint
 	Mempool    *internal.Mempool
 	Storage    *db.BlockStorage
+	P2PNode    *p2p.P2PNode
 }
 
 // CalculateKeccak256 menghasilkan hash Keccak-256 murni standar industri.
@@ -97,8 +99,8 @@ func NewGenesisBlock(difficulty uint, minerAddress string) *Block {
 	return genesis
 }
 
-// NewBlockchain menginisialisasi blockchain baru dengan blok genesis, mempool, dan koneksi disk database.
-func NewBlockchain(difficulty uint, minerAddress string, dbPath string) (*Blockchain, error) {
+// NewBlockchain menginisialisasi blockchain baru dengan blok genesis, mempool, disk database, dan p2p node.
+func NewBlockchain(difficulty uint, minerAddress string, dbPath string, p2pPort string) (*Blockchain, error) {
 	storage, err := db.NewBlockStorage(dbPath)
 	if err != nil {
 		return nil, err
@@ -110,15 +112,40 @@ func NewBlockchain(difficulty uint, minerAddress string, dbPath string) (*Blockc
 	blockBytes, _ := json.Marshal(genesis)
 	_ = storage.SaveBlock([]byte(strconv.FormatInt(genesis.Index, 10)), blockBytes)
 
-	return &Blockchain{
+	p2pNode := p2p.NewP2PNode(p2pPort)
+
+	chain := &Blockchain{
 		Blocks:     []*Block{genesis},
 		Difficulty: difficulty,
 		Mempool:    internal.NewMempool(),
 		Storage:    storage,
-	}, nil
+		P2PNode:    p2pNode,
+	}
+
+	// Tangani event ketika blok baru diterima dari jaringan P2P tetangga
+	p2pNode.NewBlockCb = func(blockData []byte) {
+		var incomingBlock Block
+		if err := json.Unmarshal(blockData, &incomingBlock); err == nil {
+			chain.Mu.Lock()
+			defer chain.Mu.Unlock()
+			
+			prevBlock := chain.Blocks[len(chain.Blocks)-1]
+			if incomingBlock.Index == prevBlock.Index+1 {
+				chain.Blocks = append(chain.Blocks, &incomingBlock)
+				
+				// Simpan ke disk lokal
+				blockBytes, _ := json.Marshal(&incomingBlock)
+				_ = chain.Storage.SaveBlock([]byte(strconv.FormatInt(incomingBlock.Index, 10)), blockBytes)
+				
+				fmt.Printf("\n[P2P] Blok baru diterima & disinkronkan dari jaringan! Index: %d\n", incomingBlock.Index)
+			}
+		}
+	}
+
+	return chain, nil
 }
 
-// MinePendingTransactions mengambil transaksi dari mempool, menambangnya, dan menyimpannya ke disk.
+// MinePendingTransactions mengambil transaksi dari mempool, menambangnya, menyimpannya ke disk, & broadcast P2P.
 func (bc *Blockchain) MinePendingTransactions(minerAddress string) (*Block, error) {
 	bc.Mu.Lock()
 	defer bc.Mu.Unlock()
@@ -153,6 +180,9 @@ func (bc *Blockchain) MinePendingTransactions(minerAddress string) (*Block, erro
 	if err == nil {
 		_ = bc.Storage.SaveBlock([]byte(strconv.FormatInt(newBlock.Index, 10)), blockBytes)
 	}
+
+	// Broadcast blok baru ke seluruh peer P2P yang terhubung di jaringan
+	go bc.P2PNode.Broadcast("NEW_BLOCK", newBlock)
 
 	return newBlock, nil
 }
@@ -195,7 +225,7 @@ func (bc *Blockchain) PrintChain() {
 	}
 }
 
-// Fungsi utama terintegrasi penuh dengan Dompet Dilithium, Mempool, Disk Storage, dan RPC Server
+// Fungsi utama daemon XCOSH terintegrasi penuh
 func main() {
 	fmt.Println("=============================================================")
 	fmt.Println("         MEMULAI DAEMON CORE XCOSH (POST-QUANTUM)            ")
@@ -212,14 +242,17 @@ func main() {
 	fmt.Printf("    Alamat (Address) : %s\n", minerWallet.GetAddress())
 	fmt.Println("-------------------------------------------------------------")
 
-	// 2. Inisialisasi Blockchain dengan Penyimpanan Database Disk (xcosh.db)
+	// 2. Inisialisasi Blockchain + Disk Database + P2P Node (Port 19333)
 	var initialDifficulty uint = 2
-	myChain, err := NewBlockchain(initialDifficulty, minerWallet.GetAddress(), "xcosh.db")
+	myChain, err := NewBlockchain(initialDifficulty, minerWallet.GetAddress(), "xcosh.db", "19333")
 	if err != nil {
 		fmt.Printf("Gagal menginisialisasi blockchain disk: %v\n", err)
 		return
 	}
 	defer myChain.Storage.Close()
+
+	// Nyalakan P2P Listener di background pada port 19333
+	go myChain.P2PNode.StartListener()
 
 	// 3. Buat Dompet Alice & Bob untuk Simulasi Transaksi
 	aliceWallet, _ := wallet.NewWallet()
@@ -261,20 +294,20 @@ func main() {
 			fmt.Println("[+] Transaksi berhasil masuk ke Mempool!")
 		}
 
-		// Tambang transaksi dalam mempool ke blok baru & simpan ke disk
-		fmt.Println("[*] Menambang blok baru dari mempool dan menyimpan ke disk...")
+		// Tambang transaksi dalam mempool ke blok baru, simpan ke disk, & broadcast P2P
+		fmt.Println("[*] Menambang blok baru, menyimpan ke disk, & broadcast P2P...")
 		_, err = myChain.MinePendingTransactions(minerWallet.GetAddress())
 		if err != nil {
 			fmt.Printf("Gagal menambang blok: %v\n", err)
 		} else {
-			fmt.Println("[+] Blok transaksi berhasil ditambang dan disimpan permanen di xcosh.db!")
+			fmt.Println("[+] Blok transaksi berhasil ditambang & di-broadcast ke port 19333!")
 		}
 	}
 
 	// Cetak rantai blockchain akhir
 	myChain.PrintChain()
 
-	// 6. Jalankan RPC/API Server di background
+	// 6. Jalankan RPC/API Server di background (Port 8333)
 	rpcServer := internal.NewRPCServer("8333", func() map[string]interface{} {
 		myChain.Mu.Lock()
 		defer myChain.Mu.Unlock()
@@ -284,12 +317,14 @@ func main() {
 			"blocks_count":  len(myChain.Blocks),
 			"difficulty":    myChain.Difficulty,
 			"mempool_size":  len(myChain.Mempool.PendingTxs),
+			"p2p_port":      "19333",
+			"active_peers":  len(myChain.P2PNode.Peers),
 			"miner_address": minerWallet.GetAddress(),
 		}
 	})
 	rpcServer.Start()
 
 	// Menjaga agar daemon terus berjalan sebagai proses latar depan (blocking)
-	fmt.Println("[*] Daemon XCOSH berjalan penuh dan siap menerima koneksi RPC...")
+	fmt.Println("[*] Daemon XCOSH berjalan penuh (P2P Port: 19333 | RPC Port: 8333)...")
 	select {}
 }
