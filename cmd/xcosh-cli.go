@@ -15,8 +15,8 @@ func main() {
 		fmt.Println("                XCOSH CLI UTILITY (CLIENT)                   ")
 		fmt.Println("=============================================================")
 		fmt.Println("Penggunaan:")
-		fmt.Println("  go run xcosh-cli.go status    - Mengecek status daemon node")
-		fmt.Println("  go run xcosh-cli.go ping      - Cek koneksi ke daemon node")
+		fmt.Println("  xcosh-cli status    - Mengecek status daemon node")
+		fmt.Println("  xcosh-cli ping      - Cek koneksi ke daemon node")
 		fmt.Println("=============================================================")
 		return
 	}
