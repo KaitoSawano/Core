@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -11,27 +12,29 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"xcosh/internal"
+	"xcosh/storage/db"
 	"xcosh/storage/wallet"
 )
 
 // Block merepresentasikan struktur data satu blok dalam blockchain mandiri.
 type Block struct {
-	Index        int64              // Tinggi/nomor blok
-	Timestamp    int64              // Waktu blok dibuat (Unix Epoch)
+	Index        int64                  // Tinggi/nomor blok
+	Timestamp    int64                  // Waktu blok dibuat (Unix Epoch)
 	Transactions []internal.Transaction // Payload transaksi sah dari mempool
-	PrevHash     []byte             // Hash dari blok sebelumnya (memastikan immutability)
-	Hash         []byte             // Hash unik blok ini hasil Keccak-256
-	Nonce        int64              // Angka penambangan Proof-of-Work
-	Difficulty   uint               // Tingkat kesulitan (jumlah byte nol di awal hash)
-	MinerAddress string             // Alamat dompet penambang (tahan kuantum/Dilithium)
+	PrevHash     []byte                 // Hash dari blok sebelumnya (memastikan immutability)
+	Hash         []byte                 // Hash unik blok ini hasil Keccak-256
+	Nonce        int64                  // Angka penambangan Proof-of-Work
+	Difficulty   uint                   // Tingkat kesulitan (jumlah byte nol di awal hash)
+	MinerAddress string                 // Alamat dompet penambang (tahan kuantum/Dilithium)
 }
 
-// Blockchain merepresentasikan struktur rantai utama dengan pengaman konkurensi (Mutex).
+// Blockchain merepresentasikan struktur rantai utama dengan pengaman konkurensi (Mutex) dan penyimpanan disk.
 type Blockchain struct {
 	mu         sync.Mutex
 	blocks     []*Block
 	difficulty uint
 	Mempool    *internal.Mempool
+	Storage    *db.BlockStorage
 }
 
 // CalculateKeccak256 menghasilkan hash Keccak-256 murni standar industri.
@@ -94,16 +97,28 @@ func NewGenesisBlock(difficulty uint, minerAddress string) *Block {
 	return genesis
 }
 
-// NewBlockchain menginisialisasi blockchain baru dengan blok genesis dan mempool.
-func NewBlockchain(difficulty uint, minerAddress string) *Blockchain {
+// NewBlockchain menginisialisasi blockchain baru dengan blok genesis, mempool, dan koneksi disk database.
+func NewBlockchain(difficulty uint, minerAddress string, dbPath string) (*Blockchain, error) {
+	storage, err := db.NewBlockStorage(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	genesis := NewGenesisBlock(difficulty, minerAddress)
+	
+	// Simpan genesis block ke disk
+	blockBytes, _ := json.Marshal(genesis)
+	_ = storage.SaveBlock([]byte(strconv.FormatInt(genesis.Index, 10)), blockBytes)
+
 	return &Blockchain{
-		blocks:     []*Block{NewGenesisBlock(difficulty, minerAddress)},
+		blocks:     []*Block{genesis},
 		difficulty: difficulty,
 		Mempool:    internal.NewMempool(),
-	}
+		Storage:    storage,
+	}, nil
 }
 
-// MinePendingTransactions mengambil transaksi dari mempool dan menambangnya ke blok baru.
+// MinePendingTransactions mengambil transaksi dari mempool, menambangnya, dan menyimpannya ke disk.
 func (bc *Blockchain) MinePendingTransactions(minerAddress string) (*Block, error) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
@@ -132,6 +147,13 @@ func (bc *Blockchain) MinePendingTransactions(minerAddress string) (*Block, erro
 	}
 
 	bc.blocks = append(bc.blocks, newBlock)
+
+	// Simpan blok baru secara permanen ke disk (BoltDB)
+	blockBytes, err := json.Marshal(newBlock)
+	if err == nil {
+		_ = bc.Storage.SaveBlock([]byte(strconv.FormatInt(newBlock.Index, 10)), blockBytes)
+	}
+
 	return newBlock, nil
 }
 
@@ -173,7 +195,7 @@ func (bc *Blockchain) PrintChain() {
 	}
 }
 
-// Fungsi utama terintegrasi penuh dengan Dompet Dilithium dan Mempool
+// Fungsi utama terintegrasi penuh dengan Dompet Dilithium, Mempool, dan Disk Storage
 func main() {
 	fmt.Println("=============================================================")
 	fmt.Println("         MEMULAI DAEMON CORE XCOSH (POST-QUANTUM)            ")
@@ -190,9 +212,14 @@ func main() {
 	fmt.Printf("    Alamat (Address) : %s\n", minerWallet.GetAddress())
 	fmt.Println("-------------------------------------------------------------")
 
-	// 2. Inisialisasi Blockchain dengan Alamat Dompet Asli
+	// 2. Inisialisasi Blockchain dengan Penyimpanan Database Disk (xcosh.db)
 	var initialDifficulty uint = 2
-	myChain := NewBlockchain(initialDifficulty, minerWallet.GetAddress())
+	myChain, err := NewBlockchain(initialDifficulty, minerWallet.GetAddress(), "xcosh.db")
+	if err != nil {
+		fmt.Printf("Gagal menginisialisasi blockchain disk: %v\n", err)
+		return
+	}
+	defer myChain.Storage.Close()
 
 	// 3. Buat Dompet Alice & Bob untuk Simulasi Transaksi
 	aliceWallet, _ := wallet.NewWallet()
@@ -234,13 +261,13 @@ func main() {
 			fmt.Println("[+] Transaksi berhasil masuk ke Mempool!")
 		}
 
-		// Tambang transaksi dalam mempool ke blok baru
-		fmt.Println("[*] Menambang blok baru dari mempool...")
+		// Tambang transaksi dalam mempool ke blok baru & simpan ke disk
+		fmt.Println("[*] Menambang blok baru dari mempool dan menyimpan ke disk...")
 		_, err = myChain.MinePendingTransactions(minerWallet.GetAddress())
 		if err != nil {
 			fmt.Printf("Gagal menambang blok: %v\n", err)
 		} else {
-			fmt.Println("[+] Blok transaksi berhasil ditambang!")
+			fmt.Println("[+] Blok transaksi berhasil ditambang dan disimpan permanen di xcosh.db!")
 		}
 	}
 
