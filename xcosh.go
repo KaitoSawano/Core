@@ -9,22 +9,21 @@ import (
 	"time"
 
 	"golang.org/x/crypto/sha3"
-	
+
 	"xcosh/internal"
-	// Mengimpor modul wallet dari direktori storage/wallet Anda
 	"xcosh/storage/wallet"
 )
 
 // Block merepresentasikan struktur data satu blok dalam blockchain mandiri.
 type Block struct {
-	Index        int64     // Tinggi/nomor blok
-	Timestamp    int64     // Waktu blok dibuat (Unix Epoch)
-	Data         []byte    // Payload transaksi atau data blok
-	PrevHash     []byte    // Hash dari blok sebelumnya (memastikan immutability)
-	Hash         []byte    // Hash unik blok ini hasil Keccak-256
-	Nonce        int64     // Angka penambangan Proof-of-Work
-	Difficulty   uint      // Tingkat kesulitan (jumlah byte nol di awal hash)
-	MinerAddress string    // Alamat dompet penambang (tahan kuantum/Dilithium)
+	Index        int64              // Tinggi/nomor blok
+	Timestamp    int64              // Waktu blok dibuat (Unix Epoch)
+	Transactions []internal.Transaction // Payload transaksi sah dari mempool
+	PrevHash     []byte             // Hash dari blok sebelumnya (memastikan immutability)
+	Hash         []byte             // Hash unik blok ini hasil Keccak-256
+	Nonce        int64              // Angka penambangan Proof-of-Work
+	Difficulty   uint               // Tingkat kesulitan (jumlah byte nol di awal hash)
+	MinerAddress string             // Alamat dompet penambang (tahan kuantum/Dilithium)
 }
 
 // Blockchain merepresentasikan struktur rantai utama dengan pengaman konkurensi (Mutex).
@@ -32,6 +31,7 @@ type Blockchain struct {
 	mu         sync.Mutex
 	blocks     []*Block
 	difficulty uint
+	Mempool    *internal.Mempool
 }
 
 // CalculateKeccak256 menghasilkan hash Keccak-256 murni standar industri.
@@ -48,10 +48,15 @@ func (b *Block) SetHash() {
 	nonceBytes := []byte(strconv.FormatInt(b.Nonce, 10))
 	diffBytes := []byte(strconv.FormatUint(uint64(b.Difficulty), 10))
 
+	var txDataBytes []byte
+	for _, tx := range b.Transactions {
+		txDataBytes = append(txDataBytes, []byte(tx.ID+tx.Sender+tx.Recipient+strconv.FormatUint(tx.Amount, 10))...)
+	}
+
 	headers := bytes.Join([][]byte{
 		indexBytes,
 		b.PrevHash,
-		b.Data,
+		txDataBytes,
 		timestampBytes,
 		nonceBytes,
 		diffBytes,
@@ -79,7 +84,7 @@ func NewGenesisBlock(difficulty uint, minerAddress string) *Block {
 	genesis := &Block{
 		Index:        0,
 		Timestamp:    1710000000,
-		Data:         []byte("Genesis Block - Koin Mandiri Tahan Kuantum"),
+		Transactions: []internal.Transaction{},
 		PrevHash:     []byte{0},
 		Nonce:        0,
 		Difficulty:   difficulty,
@@ -89,25 +94,31 @@ func NewGenesisBlock(difficulty uint, minerAddress string) *Block {
 	return genesis
 }
 
-// NewBlockchain menginisialisasi blockchain baru dengan blok genesis.
+// NewBlockchain menginisialisasi blockchain baru dengan blok genesis dan mempool.
 func NewBlockchain(difficulty uint, minerAddress string) *Blockchain {
 	return &Blockchain{
 		blocks:     []*Block{NewGenesisBlock(difficulty, minerAddress)},
 		difficulty: difficulty,
+		Mempool:    internal.NewMempool(),
 	}
 }
 
-// AddBlock memvalidasi dan menambang blok baru ke dalam rantai dengan aman (Thread-Safe).
-func (bc *Blockchain) AddBlock(data string, minerAddress string) (*Block, error) {
+// MinePendingTransactions mengambil transaksi dari mempool dan menambangnya ke blok baru.
+func (bc *Blockchain) MinePendingTransactions(minerAddress string) (*Block, error) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
+	pendingTxs := bc.Mempool.GetBlockTransactions()
+	if len(pendingTxs) == 0 {
+		return nil, errors.New("tidak ada transaksi di mempool untuk ditambang")
+	}
+
 	prevBlock := bc.blocks[len(bc.blocks)-1]
-	
+
 	newBlock := &Block{
 		Index:        prevBlock.Index + 1,
 		Timestamp:    time.Now().Unix(),
-		Data:         []byte(data),
+		Transactions: pendingTxs,
 		PrevHash:     prevBlock.Hash,
 		Nonce:        0,
 		Difficulty:   bc.difficulty,
@@ -132,7 +143,7 @@ func (bc *Blockchain) validateBlock(newBlock, prevBlock *Block) error {
 	if !bytes.Equal(newBlock.PrevHash, prevBlock.Hash) {
 		return errors.New("hash blok sebelumnya (PrevHash) tidak cocok")
 	}
-	
+
 	target := bytes.Repeat([]byte{0}, int(newBlock.Difficulty))
 	if !bytes.HasPrefix(newBlock.Hash, target) {
 		return errors.New("bukti kerja (PoW) pada blok tidak valid atau belum memenuhi target")
@@ -146,20 +157,23 @@ func (bc *Blockchain) PrintChain() {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
-	fmt.Println("\n================ [ STATUS RANTAI BLOCKCHAIN ] ================")
+	fmt.Println("\n================ [ STATUS RANTAI BLOCKCHAIN XCOSH ] ================")
 	for _, block := range bc.blocks {
 		fmt.Printf("Blok Index   : %d\n", block.Index)
 		fmt.Printf("Timestamp    : %d\n", block.Timestamp)
-		fmt.Printf("Data         : %s\n", string(block.Data))
+		fmt.Printf("Jumlah Tx    : %d transaksi\n", len(block.Transactions))
+		for idx, tx := range block.Transactions {
+			fmt.Printf("  -> Tx [%d] : %s mengirim %d XCOSH ke %s\n", idx+1, tx.Sender[:12], tx.Amount, tx.Recipient[:12])
+		}
 		fmt.Printf("Prev Hash    : %x\n", block.PrevHash)
 		fmt.Printf("Hash         : %x\n", block.Hash)
 		fmt.Printf("Nonce        : %d\n", block.Nonce)
 		fmt.Printf("Miner Wallet : %s\n", block.MinerAddress)
-		fmt.Println("-------------------------------------------------------------")
+		fmt.Println("-------------------------------------------------------------------")
 	}
 }
 
-// Fungsi utama terintegrasi penuh dengan Dompet Dilithium
+// Fungsi utama terintegrasi penuh dengan Dompet Dilithium dan Mempool
 func main() {
 	fmt.Println("=============================================================")
 	fmt.Println("         MEMULAI DAEMON CORE XCOSH (POST-QUANTUM)            ")
@@ -189,8 +203,8 @@ func main() {
 	fmt.Println("-------------------------------------------------------------")
 
 	// 4. Simulasi Penandatanganan Transaksi Tahan Kuantum
-	txData := fmt.Sprintf("Kirim 50 XCOSH dari %s ke %s", aliceWallet.GetAddress(), bobWallet.GetAddress())
-	txHash := CalculateKeccak256([]byte(txData))
+	txPayload := fmt.Sprintf("%s:%s:%d:%d", aliceWallet.GetAddress(), bobWallet.GetAddress(), uint64(50), time.Now().Unix())
+	txHash := CalculateKeccak256([]byte(txPayload))
 
 	signature, err := aliceWallet.SignTransaction(txHash)
 	if err != nil {
@@ -203,9 +217,30 @@ func main() {
 	fmt.Printf("[+] Verifikasi Tanda Tangan Alice (Dilithium): %v\n", isValid)
 
 	if isValid {
-		_, err = myChain.AddBlock(txData, minerWallet.GetAddress())
+		tx := internal.Transaction{
+			ID:        fmt.Sprintf("%x", txHash[:8]),
+			Sender:    aliceWallet.GetAddress(),
+			Recipient: bobWallet.GetAddress(),
+			Amount:    50,
+			Timestamp: time.Now().Unix(),
+			Signature: signature,
+		}
+
+		// Masukkan transaksi ke mempool
+		err = myChain.Mempool.AddTransaction(tx)
 		if err != nil {
-			fmt.Printf("Gagal menambah blok: %v\n", err)
+			fmt.Printf("Gagal memasukkan transaksi ke mempool: %v\n", err)
+		} else {
+			fmt.Println("[+] Transaksi berhasil masuk ke Mempool!")
+		}
+
+		// Tambang transaksi dalam mempool ke blok baru
+		fmt.Println("[*] Menambang blok baru dari mempool...")
+		_, err = myChain.MinePendingTransactions(minerWallet.GetAddress())
+		if err != nil {
+			fmt.Printf("Gagal menambang blok: %v\n", err)
+		} else {
+			fmt.Println("[+] Blok transaksi berhasil ditambang!")
 		}
 	}
 
