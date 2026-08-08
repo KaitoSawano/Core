@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 )
 
 const rpcServerURL = "http://localhost:19332"
@@ -19,9 +21,10 @@ func main() {
 			fmt.Println("=============================================================")
 			fmt.Println("  1. Cek Status Node (status)")
 			fmt.Println("  2. Tes Koneksi Node (ping)")
-			fmt.Println("  3. Keluar (Exit)")
+			fmt.Println("  3. Tambah Peer Node (addnode)")
+			fmt.Println("  4. Keluar (Exit)")
 			fmt.Println("=============================================================")
-			fmt.Print("Pilih menu [1-3]: ")
+			fmt.Print("Pilih menu [1-4]: ")
 
 			var choice string
 			if _, err := fmt.Scanln(&choice); err != nil {
@@ -33,7 +36,9 @@ func main() {
 				runStatus()
 			case "2", "ping":
 				runPing()
-			case "3", "exit":
+			case "3", "addnode":
+				runAddNode()
+			case "4", "exit":
 				fmt.Println("Keluar dari CLI...")
 				return
 			default:
@@ -43,13 +48,15 @@ func main() {
 		return
 	}
 
-	// Jika dijalankan dengan argumen langsung (misal: xcosh-cli status)
+	// Jika dijalankan dengan argumen langsung (misal: xcosh-cli status atau xcosh-cli addnode)
 	command := os.Args[1]
 	switch command {
 	case "ping":
 		runPing()
 	case "status":
 		runStatus()
+	case "addnode":
+		runAddNode()
 	default:
 		fmt.Printf("Perintah tidak dikenal: '%s'. Ketik 'xcosh-cli' tanpa argumen untuk menu interaktif.\n", command)
 	}
@@ -92,4 +99,35 @@ func runStatus() {
 	fmt.Printf("Peer Aktif    : %v\n", result["active_peers"])
 	fmt.Printf("Dompet Miner  : %v\n", result["miner_address"])
 	fmt.Println("-------------------------------------------------------")
+}
+
+func runAddNode() {
+	var address string
+
+	// Jika addnode dipanggil via argumen CLI (misal: xcosh-cli addnode 127.0.0.1:19333)
+	if len(os.Args) > 2 {
+		address = os.Args[2]
+	} else {
+		// Jika dipanggil via menu interaktif, minta input dari pengguna
+		fmt.Print("\nMasukkan alamat peer (contoh: 192.168.1.50:19333): ")
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		address = strings.TrimSpace(input)
+	}
+
+	if address == "" {
+		fmt.Println("[!] Alamat peer tidak boleh kosong.")
+		return
+	}
+
+	url := fmt.Sprintf("%s/addnode?addr=%s", rpcServerURL, address)
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("\n[!] Gagal mengirim permintaan addnode ke daemon: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Printf("\n[+] Respon Daemon: %s\n", string(body))
 }
