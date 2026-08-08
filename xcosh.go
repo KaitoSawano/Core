@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/crypto/sha3"
 	
+	"xcosh/internal"
 	// Mengimpor modul wallet dari direktori storage/wallet Anda
 	"xcosh/storage/wallet"
 )
