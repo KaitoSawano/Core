@@ -30,9 +30,9 @@ type Block struct {
 
 // Blockchain merepresentasikan struktur rantai utama dengan pengaman konkurensi (Mutex) dan penyimpanan disk.
 type Blockchain struct {
-	mu         sync.Mutex
-	blocks     []*Block
-	difficulty uint
+	Mu         sync.Mutex
+	Blocks     []*Block
+	Difficulty uint
 	Mempool    *internal.Mempool
 	Storage    *db.BlockStorage
 }
@@ -111,8 +111,8 @@ func NewBlockchain(difficulty uint, minerAddress string, dbPath string) (*Blockc
 	_ = storage.SaveBlock([]byte(strconv.FormatInt(genesis.Index, 10)), blockBytes)
 
 	return &Blockchain{
-		blocks:     []*Block{genesis},
-		difficulty: difficulty,
+		Blocks:     []*Block{genesis},
+		Difficulty: difficulty,
 		Mempool:    internal.NewMempool(),
 		Storage:    storage,
 	}, nil
@@ -120,15 +120,15 @@ func NewBlockchain(difficulty uint, minerAddress string, dbPath string) (*Blockc
 
 // MinePendingTransactions mengambil transaksi dari mempool, menambangnya, dan menyimpannya ke disk.
 func (bc *Blockchain) MinePendingTransactions(minerAddress string) (*Block, error) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
+	bc.Mu.Lock()
+	defer bc.Mu.Unlock()
 
 	pendingTxs := bc.Mempool.GetBlockTransactions()
 	if len(pendingTxs) == 0 {
 		return nil, errors.New("tidak ada transaksi di mempool untuk ditambang")
 	}
 
-	prevBlock := bc.blocks[len(bc.blocks)-1]
+	prevBlock := bc.Blocks[len(bc.Blocks)-1]
 
 	newBlock := &Block{
 		Index:        prevBlock.Index + 1,
@@ -136,7 +136,7 @@ func (bc *Blockchain) MinePendingTransactions(minerAddress string) (*Block, erro
 		Transactions: pendingTxs,
 		PrevHash:     prevBlock.Hash,
 		Nonce:        0,
-		Difficulty:   bc.difficulty,
+		Difficulty:   bc.Difficulty,
 		MinerAddress: minerAddress,
 	}
 
@@ -146,7 +146,7 @@ func (bc *Blockchain) MinePendingTransactions(minerAddress string) (*Block, erro
 		return nil, err
 	}
 
-	bc.blocks = append(bc.blocks, newBlock)
+	bc.Blocks = append(bc.Blocks, newBlock)
 
 	// Simpan blok baru secara permanen ke disk (BoltDB)
 	blockBytes, err := json.Marshal(newBlock)
@@ -176,11 +176,11 @@ func (bc *Blockchain) validateBlock(newBlock, prevBlock *Block) error {
 
 // PrintChain mencetak seluruh informasi rantai blok ke terminal.
 func (bc *Blockchain) PrintChain() {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
+	bc.Mu.Lock()
+	defer bc.Mu.Unlock()
 
 	fmt.Println("\n================ [ STATUS RANTAI BLOCKCHAIN XCOSH ] ================")
-	for _, block := range bc.blocks {
+	for _, block := range bc.Blocks {
 		fmt.Printf("Blok Index   : %d\n", block.Index)
 		fmt.Printf("Timestamp    : %d\n", block.Timestamp)
 		fmt.Printf("Jumlah Tx    : %d transaksi\n", len(block.Transactions))
@@ -195,7 +195,7 @@ func (bc *Blockchain) PrintChain() {
 	}
 }
 
-// Fungsi utama terintegrasi penuh dengan Dompet Dilithium, Mempool, dan Disk Storage
+// Fungsi utama terintegrasi penuh dengan Dompet Dilithium, Mempool, Disk Storage, dan RPC Server
 func main() {
 	fmt.Println("=============================================================")
 	fmt.Println("         MEMULAI DAEMON CORE XCOSH (POST-QUANTUM)            ")
@@ -273,4 +273,23 @@ func main() {
 
 	// Cetak rantai blockchain akhir
 	myChain.PrintChain()
+
+	// 6. Jalankan RPC/API Server di background
+	rpcServer := internal.NewRPCServer("8333", func() map[string]interface{} {
+		myChain.Mu.Lock()
+		defer myChain.Mu.Unlock()
+		return map[string]interface{}{
+			"coin":          "XCOSH",
+			"version":       "1.0.0-post-quantum",
+			"blocks_count":  len(myChain.Blocks),
+			"difficulty":    myChain.Difficulty,
+			"mempool_size":  len(myChain.Mempool.PendingTxs),
+			"miner_address": minerWallet.GetAddress(),
+		}
+	})
+	rpcServer.Start()
+
+	// Menjaga agar daemon terus berjalan sebagai proses latar depan (blocking)
+	fmt.Println("[*] Daemon XCOSH berjalan penuh dan siap menerima koneksi RPC...")
+	select {}
 }
