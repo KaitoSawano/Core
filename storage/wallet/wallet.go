@@ -9,6 +9,13 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+// CalculateKeccak256 menghasilkan hash Keccak-256 untuk modul wallet.
+func CalculateKeccak256(data []byte) []byte {
+	hash := sha3.NewLegacyKeccak256()
+	hash.Write(data)
+	return hash.Sum(nil)
+}
+
 // Ukuran spesifikasi Dilithium-2 (ML-DSA-44) standar NIST
 const (
 	DilithiumPublicKeyBytes  = 1312
@@ -25,12 +32,10 @@ type Wallet struct {
 }
 
 // GenerateDilithiumKeypair mensimulasikan pemuatan entropi acak untuk membuat pasangan kunci Dilithium.
-// Pada lingkungan produksi, fungsi ini memanggil implementasi algoritma Lattice ML-DSA murni.
 func GenerateDilithiumKeypair() ([]byte, []byte, error) {
 	pubKey := make([]byte, DilithiumPublicKeyBytes)
 	privKey := make([]byte, DilithiumPrivateKeyBytes)
 
-	// Mengisi entropi dari CS-PRNG sistem operasi (crypto/rand)
 	if _, err := rand.Read(pubKey); err != nil {
 		return nil, nil, err
 	}
@@ -43,13 +48,8 @@ func GenerateDilithiumKeypair() ([]byte, []byte, error) {
 
 // GenerateAddress membuat alamat dompet koin unik dari Public Key Dilithium menggunakan Keccak-256.
 func GenerateAddress(pubKey []byte) string {
-	// 1. Hash public key dengan Keccak-256
 	hash := CalculateKeccak256(pubKey)
-
-	// 2. Ambil 20 byte terakhir dari hash (seperti standar address modern)
 	addressBytes := hash[len(hash)-20:]
-
-	// 3. Konversi ke hex dan tambahkan prefix "xc"
 	return AddressPrefix + hex.EncodeToString(addressBytes)
 }
 
@@ -75,16 +75,13 @@ func (w *Wallet) SignTransaction(txHash []byte) ([]byte, error) {
 		return nil, errors.New("ukuran private key Dilithium tidak valid")
 	}
 
-	// Buat signature buffer
 	signature := make([]byte, DilithiumSignatureBytes)
 
-	// Kunci signature dengan kombinasi Keccak(txHash + PrivateKey) untuk deterministik safety
 	h := sha3.NewLegacyKeccak256()
 	h.Write(txHash)
 	h.Write(w.PrivateKey)
 	digest := h.Sum(nil)
 
-	// Mengisi buffer signature secara aman dari entropi digest
 	for i := 0; i < len(signature); i++ {
 		signature[i] = digest[i%len(digest)] ^ w.PrivateKey[i%len(w.PrivateKey)]
 	}
@@ -98,12 +95,10 @@ func VerifySignature(pubKey []byte, txHash []byte, signature []byte) bool {
 		return false
 	}
 
-	// Verifikasi korelasi matematis digest
 	h := sha3.NewLegacyKeccak256()
 	h.Write(txHash)
 	digest := h.Sum(nil)
 
-	// Validasi awal integritas byte tanda tangan
 	if signature[0] == 0 && signature[1] == 0 {
 		return false
 	}
