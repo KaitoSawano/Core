@@ -10,18 +10,23 @@ import (
 	"strings"
 )
 
-// Struktur sederhana untuk membaca rpcport dari xcosh.conf secara otomatis
+// Struktur untuk membaca rpchost dan rpcport dari xcosh.conf secara otomatis
 func getRPCServerURL() string {
 	rpcPort := "19332" // Default port RPC
-	host := "127.0.0.1"
+	host := "127.0.0.1" // Default host RPC
 
-	// Cek apakah ada file xcosh.conf di direktori lokal untuk membaca port kustom
+	// Cek apakah ada file xcosh.conf di direktori lokal untuk membaca konfigurasi kustom
 	if file, err := os.Open("xcosh.conf"); err == nil {
 		defer file.Close()
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
-			if strings.HasPrefix(line, "rpcport=") {
+			if strings.HasPrefix(line, "rpchost=") {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					host = strings.TrimSpace(parts[1])
+				}
+			} else if strings.HasPrefix(line, "rpcport=") {
 				parts := strings.SplitN(line, "=", 2)
 				if len(parts) == 2 {
 					rpcPort = strings.TrimSpace(parts[1])
@@ -71,7 +76,7 @@ func main() {
 		return
 	}
 
-	// Jika dijalankan langsung dengan argumen, misal: ./xcosh-cli addnode 127.0.0.1:19333
+	// Jika dijalankan langsung dengan argumen
 	command := os.Args[1]
 	var argVal string
 	if len(os.Args) > 2 {
