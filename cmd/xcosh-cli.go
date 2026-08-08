@@ -10,13 +10,27 @@ import (
 	"strings"
 )
 
-// Mengambil URL RPC dari environment variable XCOSH_RPC, default ke IP publik/node utama jika diset atau kosongkan agar wajib diisi
+// Struktur sederhana untuk membaca rpcport dari xcosh.conf secara otomatis
 func getRPCServerURL() string {
-	if url := os.Getenv("XCOSH_RPC"); url != "" {
-		return url
+	rpcPort := "19332" // Default port RPC
+	host := "127.0.0.1"
+
+	// Cek apakah ada file xcosh.conf di direktori lokal untuk membaca port kustom
+	if file, err := os.Open("xcosh.conf"); err == nil {
+		defer file.Close()
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if strings.HasPrefix(line, "rpcport=") {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					rpcPort = strings.TrimSpace(parts[1])
+				}
+			}
+		}
 	}
-	// Default global endpoint jika env belum diset
-	return "http://127.0.0.1:19332"
+
+	return fmt.Sprintf("http://%s:%s", host, rpcPort)
 }
 
 func main() {
@@ -26,10 +40,8 @@ func main() {
 	if len(os.Args) < 2 {
 		for {
 			fmt.Println("\n=============================================================")
-			fmt.Println("                XCOSH CLI UTILITY (GLOBAL)                   ")
+			fmt.Println("                XCOSH CLI UTILITY (CLIENT)                   ")
 			fmt.Println("=============================================================")
-			fmt.Printf(" Target Node : %s\n", rpcServerURL)
-			fmt.Println("-------------------------------------------------------------")
 			fmt.Println("  1. Cek Status Node (status)")
 			fmt.Println("  2. Tes Koneksi Node (ping)")
 			fmt.Println("  3. Tambah Peer Node (addnode)")
@@ -48,7 +60,7 @@ func main() {
 			case "2", "ping":
 				runPing(rpcServerURL)
 			case "3", "addnode":
-				runAddNode(rpcServerURL)
+				runAddNode(rpcServerURL, "")
 			case "4", "exit":
 				fmt.Println("Keluar dari CLI...")
 				return
@@ -59,15 +71,20 @@ func main() {
 		return
 	}
 
-	// Jika dijalankan dengan argumen langsung
+	// Jika dijalankan langsung dengan argumen, misal: ./xcosh-cli addnode 127.0.0.1:19333
 	command := os.Args[1]
+	var argVal string
+	if len(os.Args) > 2 {
+		argVal = os.Args[2]
+	}
+
 	switch command {
 	case "ping":
 		runPing(rpcServerURL)
 	case "status":
 		runStatus(rpcServerURL)
 	case "addnode":
-		runAddNode(rpcServerURL)
+		runAddNode(rpcServerURL, argVal)
 	default:
 		fmt.Printf("Perintah tidak dikenal: '%s'. Ketik 'xcosh-cli' tanpa argumen untuk menu interaktif.\n", command)
 	}
@@ -76,7 +93,7 @@ func main() {
 func runPing(serverURL string) {
 	resp, err := http.Get(serverURL + "/ping")
 	if err != nil {
-		fmt.Printf("\n[!] Gagal terhubung ke daemon XCOSH di %s: %v\n", serverURL, err)
+		fmt.Printf("\n[!] Gagal terhubung ke daemon XCOSH: %v\n", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -88,7 +105,7 @@ func runPing(serverURL string) {
 func runStatus(serverURL string) {
 	resp, err := http.Get(serverURL + "/status")
 	if err != nil {
-		fmt.Printf("\n[!] Gagal terhubung ke daemon XCOSH di %s: %v\n", serverURL, err)
+		fmt.Printf("\n[!] Gagal terhubung ke daemon XCOSH: %v\n", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -100,7 +117,6 @@ func runStatus(serverURL string) {
 	}
 
 	fmt.Println("\n================ [ STATUS NODE XCOSH ] ================")
-	fmt.Printf("Target Node   : %s\n", serverURL)
 	fmt.Printf("Koin          : %v\n", result["coin"])
 	fmt.Printf("Versi         : %v\n", result["version"])
 	fmt.Printf("Total Blok    : %v\n", result["blocks_count"])
@@ -113,13 +129,9 @@ func runStatus(serverURL string) {
 	fmt.Println("-------------------------------------------------------")
 }
 
-func runAddNode(serverURL string) {
-	var address string
-
-	if len(os.Args) > 2 {
-		address = os.Args[2]
-	} else {
-		fmt.Print("\nMasukkan alamat peer (contoh: IP_PUBLIK:19333): ")
+func runAddNode(serverURL string, address string) {
+	if address == "" {
+		fmt.Print("\nMasukkan alamat peer (contoh: 192.168.1.50:19333): ")
 		reader := bufio.NewReader(os.Stdin)
 		input, _ := reader.ReadString('\n')
 		address = strings.TrimSpace(input)
