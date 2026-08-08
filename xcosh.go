@@ -252,6 +252,10 @@ func main() {
 	fmt.Println("         MEMULAI DAEMON CORE XCOSH (POST-QUANTUM)            ")
 	fmt.Println("=============================================================")
 
+	// Muat konfigurasi dari xcosh.conf (Ala Bitcoin Core)
+	cfg := internal.LoadConfig("xcosh.conf")
+	fmt.Printf("[+] Konfigurasi dimuat (P2P Port: %s | RPC Port: %s)\n", cfg.P2PPort, cfg.RPCPort)
+
 	// 1. Buat Dompet Penambang menggunakan Modul Dilithium
 	minerWallet, err := wallet.NewWallet()
 	if err != nil {
@@ -263,16 +267,16 @@ func main() {
 	fmt.Printf("    Alamat (Address) : %s\n", minerWallet.GetAddress())
 	fmt.Println("-------------------------------------------------------------")
 
-	// 2. Inisialisasi Blockchain + Disk Database + P2P Node (Port Default 19333)
+	// 2. Inisialisasi Blockchain + Disk Database + P2P Node (Menggunakan port dari xcosh.conf)
 	var initialDifficulty uint = 2
-	myChain, err := NewBlockchain(initialDifficulty, minerWallet.GetAddress(), "xcosh.db", "19333")
+	myChain, err := NewBlockchain(initialDifficulty, minerWallet.GetAddress(), "xcosh.db", cfg.P2PPort)
 	if err != nil {
 		fmt.Printf("Gagal menginisialisasi blockchain disk: %v\n", err)
 		return
 	}
 	defer myChain.Storage.Close()
 
-	// Nyalakan P2P Listener di background pada port 19333
+	// Nyalakan P2P Listener di background pada port dari config
 	go myChain.P2PNode.StartListener()
 
 	// 3. Buat Dompet Alice & Bob untuk Simulasi Transaksi
@@ -321,15 +325,15 @@ func main() {
 		if err != nil {
 			fmt.Printf("Gagal menambang blok: %v\n", err)
 		} else {
-			fmt.Println("[+] Blok transaksi berhasil ditambang & di-broadcast ke port 19333!")
+			fmt.Printf("[+] Blok transaksi berhasil ditambang & di-broadcast ke port %s!\n", cfg.P2PPort)
 		}
 	}
 
 	// Cetak rantai blockchain akhir
 	myChain.PrintChain()
 
-	// 6. Jalankan RPC/API Server di background (Port 19332)
-	rpcServer := internal.NewRPCServer("19332", func() map[string]interface{} {
+	// 6. Jalankan RPC/API Server di background (Menggunakan port dan callback addnode dari xcosh.conf)
+	rpcServer := internal.NewRPCServer(cfg.RPCPort, func() map[string]interface{} {
 		myChain.Mu.Lock()
 		defer myChain.Mu.Unlock()
 		return map[string]interface{}{
@@ -338,15 +342,18 @@ func main() {
 			"blocks_count":  len(myChain.Blocks),
 			"difficulty":    myChain.Difficulty,
 			"mempool_size":  len(myChain.Mempool.PendingTxs),
-			"p2p_port":      "19333",
-			"rpc_port":      "19332",
+			"p2p_port":      cfg.P2PPort,
+			"rpc_port":      cfg.RPCPort,
 			"active_peers":  len(myChain.P2PNode.Peers),
 			"miner_address": minerWallet.GetAddress(),
 		}
+	}, func(addr string) {
+		fmt.Printf("\n[RPC] Menerima perintah addnode ke: %s\n", addr)
+		myChain.P2PNode.ConnectToPeer(addr)
 	})
 	rpcServer.Start()
 
 	// Menjaga agar daemon terus berjalan sebagai proses latar depan (blocking)
-	fmt.Println("[*] Daemon XCOSH berjalan penuh (P2P Port: 19333 | RPC Port: 19332)...")
+	fmt.Printf("[*] Daemon XCOSH berjalan penuh (P2P Port: %s | RPC Port: %s)...\n", cfg.P2PPort, cfg.RPCPort)
 	select {}
 }
