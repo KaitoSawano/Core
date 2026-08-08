@@ -2,8 +2,6 @@ package internal
 
 import (
 	"errors"
-	"fmt"
-	"time"
 )
 
 // Transaction merepresentasikan struktur data transaksi antar dompet XCOSH.
