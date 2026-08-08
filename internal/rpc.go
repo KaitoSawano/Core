@@ -8,9 +8,9 @@ import (
 
 // RPCServer merepresentasikan peladen HTTP API untuk node XCOSH
 type RPCServer struct {
-	Port         string
-	GetInfoFunc  func() map[string]interface{}
-	AddNodeFunc  func(addr string) // Callback untuk menangani perintah addnode
+	Port        string
+	GetInfoFunc func() map[string]interface{}
+	AddNodeFunc func(addr string) // Callback untuk menangani perintah addnode
 }
 
 // NewRPCServer menginisialisasi instance RPC server baru
