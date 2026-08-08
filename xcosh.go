@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"golang.org/x/crypto/sha3"
+	
+	// Mengimpor modul wallet dari direktori storage/wallet Anda
+	"xcosh/storage/wallet"
 )
 
 // Block merepresentasikan struktur data satu blok dalam blockchain mandiri.
@@ -25,9 +28,9 @@ type Block struct {
 
 // Blockchain merepresentasikan struktur rantai utama dengan pengaman konkurensi (Mutex).
 type Blockchain struct {
-	mu           sync.Mutex
-	blocks       []*Block
-	difficulty   uint
+	mu         sync.Mutex
+	blocks     []*Block
+	difficulty uint
 }
 
 // CalculateKeccak256 menghasilkan hash Keccak-256 murni standar industri.
@@ -59,12 +62,10 @@ func (b *Block) SetHash() {
 
 // MineBlock menjalankan algoritma Proof-of-Work (PoW) hingga hash memenuhi target kesulitan.
 func (b *Block) MineBlock() {
-	// Membuat target prefix berupa byte nol sejumlah b.Difficulty
 	target := bytes.Repeat([]byte{0}, int(b.Difficulty))
 
 	for {
 		b.SetHash()
-		// Periksa apakah byte awal hash sesuai dengan target kesulitan
 		if bytes.HasPrefix(b.Hash, target) {
 			break
 		}
@@ -76,7 +77,7 @@ func (b *Block) MineBlock() {
 func NewGenesisBlock(difficulty uint, minerAddress string) *Block {
 	genesis := &Block{
 		Index:        0,
-		Timestamp:    1710000000, // Timestamp tetap untuk genesis
+		Timestamp:    1710000000,
 		Data:         []byte("Genesis Block - Koin Mandiri Tahan Kuantum"),
 		PrevHash:     []byte{0},
 		Nonce:        0,
@@ -112,10 +113,8 @@ func (bc *Blockchain) AddBlock(data string, minerAddress string) (*Block, error)
 		MinerAddress: minerAddress,
 	}
 
-	// Lakukan penambangan PoW
 	newBlock.MineBlock()
 
-	// Validasi integritas blok sebelum dimasukkan ke rantai
 	if err := bc.validateBlock(newBlock, prevBlock); err != nil {
 		return nil, err
 	}
@@ -133,7 +132,6 @@ func (bc *Blockchain) validateBlock(newBlock, prevBlock *Block) error {
 		return errors.New("hash blok sebelumnya (PrevHash) tidak cocok")
 	}
 	
-	// Validasi ulang hash blok untuk memastikan tidak ada manipulasi data
 	target := bytes.Repeat([]byte{0}, int(newBlock.Difficulty))
 	if !bytes.HasPrefix(newBlock.Hash, target) {
 		return errors.New("bukti kerja (PoW) pada blok tidak valid atau belum memenuhi target")
@@ -142,14 +140,7 @@ func (bc *Blockchain) validateBlock(newBlock, prevBlock *Block) error {
 	return nil
 }
 
-// GetLatestBlock mengembalikan blok terakhir yang ada di rantai dengan aman.
-func (bc *Blockchain) GetLatestBlock() *Block {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-	return bc.blocks[len(bc.blocks)-1]
-}
-
-// PrintChain mencetak seluruh informasi rantai blok ke terminal (untuk keperluan debugging node).
+// PrintChain mencetak seluruh informasi rantai blok ke terminal.
 func (bc *Blockchain) PrintChain() {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
@@ -167,29 +158,56 @@ func (bc *Blockchain) PrintChain() {
 	}
 }
 
-// Fungsi utama sementara untuk menguji modul file pertama ini
+// Fungsi utama terintegrasi penuh dengan Dompet Dilithium
 func main() {
-	fmt.Println("Memulai Daemon Core Koin Mandiri...")
+	fmt.Println("=============================================================")
+	fmt.Println("         MEMULAI DAEMON CORE XCOSH (POST-QUANTUM)            ")
+	fmt.Println("=============================================================")
 
-	// Tentukan tingkat kesulitan awal PoW (misal: 2 byte awal harus bernilai 0)
+	// 1. Buat Dompet Penambang menggunakan Modul Dilithium
+	minerWallet, err := wallet.NewWallet()
+	if err != nil {
+		fmt.Printf("Gagal membuat dompet miner: %v\n", err)
+		return
+	}
+
+	fmt.Println("[+] Dompet Miner Berhasil Dibuat!")
+	fmt.Printf("    Alamat (Address) : %s\n", minerWallet.GetAddress())
+	fmt.Println("-------------------------------------------------------------")
+
+	// 2. Inisialisasi Blockchain dengan Alamat Dompet Asli
 	var initialDifficulty uint = 2
-	minerWallet := "dilithium_pubkey_testnet_xyz9812376"
+	myChain := NewBlockchain(initialDifficulty, minerWallet.GetAddress())
 
-	// Inisialisasi Blockchain
-	myChain := NewBlockchain(initialDifficulty, minerWallet)
+	// 3. Buat Dompet Alice & Bob untuk Simulasi Transaksi
+	aliceWallet, _ := wallet.NewWallet()
+	bobWallet, _ := wallet.NewWallet()
 
-	// Tambah blok transaksi pertama
-	_, err := myChain.AddBlock("Transaksi #1: Alice mengirim 50 Koin ke Bob", minerWallet)
+	fmt.Printf("[+] Dompet Alice : %s\n", aliceWallet.GetAddress())
+	fmt.Printf("[+] Dompet Bob   : %s\n", bobWallet.GetAddress())
+	fmt.Println("-------------------------------------------------------------")
+
+	// 4. Simulasi Penandatanganan Transaksi Tahan Kuantum
+	txData := fmt.Sprintf("Kirim 50 XCOSH dari %s ke %s", aliceWallet.GetAddress(), bobWallet.GetAddress())
+	txHash := CalculateKeccak256([]byte(txData))
+
+	signature, err := aliceWallet.SignTransaction(txHash)
 	if err != nil {
-		fmt.Printf("Gagal menambah blok: %v\n", err)
+		fmt.Printf("Gagal tanda tangan transaksi: %v\n", err)
+		return
 	}
 
-	// Tambah blok transaksi kedua
-	_, err = myChain.AddBlock("Transaksi #2: Bob mengirim 10 Koin ke Charlie", minerWallet)
-	if err != nil {
-		fmt.Printf("Gagal menambah blok: %v\n", err)
+	// 5. Verifikasi Keabsahan Tanda Tangan Dilithium
+	isValid := wallet.VerifySignature(aliceWallet.PublicKey, txHash, signature)
+	fmt.Printf("[+] Verifikasi Tanda Tangan Alice (Dilithium): %v\n", isValid)
+
+	if isValid {
+		_, err = myChain.AddBlock(txData, minerWallet.GetAddress())
+		if err != nil {
+			fmt.Printf("Gagal menambah blok: %v\n", err)
+		}
 	}
 
-	// Tampilkan seluruh rantai
+	// Cetak rantai blockchain akhir
 	myChain.PrintChain()
 }
