@@ -10,15 +10,26 @@ import (
 	"strings"
 )
 
-const rpcServerURL = "http://localhost:19332"
+// Mengambil URL RPC dari environment variable XCOSH_RPC, default ke IP publik/node utama jika diset atau kosongkan agar wajib diisi
+func getRPCServerURL() string {
+	if url := os.Getenv("XCOSH_RPC"); url != "" {
+		return url
+	}
+	// Default global endpoint jika env belum diset
+	return "http://127.0.0.1:19332"
+}
 
 func main() {
+	rpcServerURL := getRPCServerURL()
+
 	// Jika dijalankan tanpa argumen, masuk ke menu interaktif
 	if len(os.Args) < 2 {
 		for {
 			fmt.Println("\n=============================================================")
-			fmt.Println("                XCOSH CLI UTILITY (CLIENT)                   ")
+			fmt.Println("                XCOSH CLI UTILITY (GLOBAL)                   ")
 			fmt.Println("=============================================================")
+			fmt.Printf(" Target Node : %s\n", rpcServerURL)
+			fmt.Println("-------------------------------------------------------------")
 			fmt.Println("  1. Cek Status Node (status)")
 			fmt.Println("  2. Tes Koneksi Node (ping)")
 			fmt.Println("  3. Tambah Peer Node (addnode)")
@@ -33,11 +44,11 @@ func main() {
 
 			switch choice {
 			case "1", "status":
-				runStatus()
+				runStatus(rpcServerURL)
 			case "2", "ping":
-				runPing()
+				runPing(rpcServerURL)
 			case "3", "addnode":
-				runAddNode()
+				runAddNode(rpcServerURL)
 			case "4", "exit":
 				fmt.Println("Keluar dari CLI...")
 				return
@@ -48,24 +59,24 @@ func main() {
 		return
 	}
 
-	// Jika dijalankan dengan argumen langsung (misal: xcosh-cli status atau xcosh-cli addnode)
+	// Jika dijalankan dengan argumen langsung
 	command := os.Args[1]
 	switch command {
 	case "ping":
-		runPing()
+		runPing(rpcServerURL)
 	case "status":
-		runStatus()
+		runStatus(rpcServerURL)
 	case "addnode":
-		runAddNode()
+		runAddNode(rpcServerURL)
 	default:
 		fmt.Printf("Perintah tidak dikenal: '%s'. Ketik 'xcosh-cli' tanpa argumen untuk menu interaktif.\n", command)
 	}
 }
 
-func runPing() {
-	resp, err := http.Get(rpcServerURL + "/ping")
+func runPing(serverURL string) {
+	resp, err := http.Get(serverURL + "/ping")
 	if err != nil {
-		fmt.Printf("\n[!] Gagal terhubung ke daemon XCOSH (Pastikan xcosh -daemon aktif): %v\n", err)
+		fmt.Printf("\n[!] Gagal terhubung ke daemon XCOSH di %s: %v\n", serverURL, err)
 		return
 	}
 	defer resp.Body.Close()
@@ -74,10 +85,10 @@ func runPing() {
 	fmt.Printf("\n[+] Respons Daemon: %s\n", string(body))
 }
 
-func runStatus() {
-	resp, err := http.Get(rpcServerURL + "/status")
+func runStatus(serverURL string) {
+	resp, err := http.Get(serverURL + "/status")
 	if err != nil {
-		fmt.Printf("\n[!] Gagal terhubung ke daemon XCOSH: %v\n", err)
+		fmt.Printf("\n[!] Gagal terhubung ke daemon XCOSH di %s: %v\n", serverURL, err)
 		return
 	}
 	defer resp.Body.Close()
@@ -89,6 +100,7 @@ func runStatus() {
 	}
 
 	fmt.Println("\n================ [ STATUS NODE XCOSH ] ================")
+	fmt.Printf("Target Node   : %s\n", serverURL)
 	fmt.Printf("Koin          : %v\n", result["coin"])
 	fmt.Printf("Versi         : %v\n", result["version"])
 	fmt.Printf("Total Blok    : %v\n", result["blocks_count"])
@@ -101,15 +113,13 @@ func runStatus() {
 	fmt.Println("-------------------------------------------------------")
 }
 
-func runAddNode() {
+func runAddNode(serverURL string) {
 	var address string
 
-	// Jika addnode dipanggil via argumen CLI (misal: xcosh-cli addnode 127.0.0.1:19333)
 	if len(os.Args) > 2 {
 		address = os.Args[2]
 	} else {
-		// Jika dipanggil via menu interaktif, minta input dari pengguna
-		fmt.Print("\nMasukkan alamat peer (contoh: 192.168.1.50:19333): ")
+		fmt.Print("\nMasukkan alamat peer (contoh: IP_PUBLIK:19333): ")
 		reader := bufio.NewReader(os.Stdin)
 		input, _ := reader.ReadString('\n')
 		address = strings.TrimSpace(input)
@@ -120,7 +130,7 @@ func runAddNode() {
 		return
 	}
 
-	url := fmt.Sprintf("%s/addnode?addr=%s", rpcServerURL, address)
+	url := fmt.Sprintf("%s/addnode?addr=%s", serverURL, address)
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Printf("\n[!] Gagal mengirim permintaan addnode ke daemon: %v\n", err)
